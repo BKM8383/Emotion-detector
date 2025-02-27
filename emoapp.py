@@ -12,162 +12,164 @@ mp_hands = mp.solutions.hands
 mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 
-# Global variables for behavior analysis
-if "behavior_report" not in st.session_state:
-    st.session_state.behavior_report = []
-if "emotion_totals" not in st.session_state:
-    st.session_state.emotion_totals = {"happy": 0, "sad": 0, "angry": 0, "surprise": 0, "fear": 0, "disgust": 0, "neutral": 0}
-if "frame_count" not in st.session_state:
-    st.session_state.frame_count = 0
-if "hand_gesture_count" not in st.session_state:
-    st.session_state.hand_gesture_count = {"tense": 0, "relaxed": 0}
-if "eye_direction_count" not in st.session_state:
-    st.session_state.eye_direction_count = {"left": 0, "right": 0, "center": 0}
-if "head_movement_count" not in st.session_state:
-    st.session_state.head_movement_count = {"up": 0, "down": 0, "still": 0}
+# Initialize session state variables
+def initialize_session_state():
+    if "behavior_report" not in st.session_state:
+        st.session_state.behavior_report = []
+    if "emotion_totals" not in st.session_state:
+        st.session_state.emotion_totals = {"happy": 0, "sad": 0, "angry": 0, 
+                                         "surprise": 0, "fear": 0, "disgust": 0, "neutral": 0}
+    if "frame_count" not in st.session_state:
+        st.session_state.frame_count = 0
+    if "hand_gesture_count" not in st.session_state:
+        st.session_state.hand_gesture_count = {"tense": 0, "relaxed": 0}
+    if "eye_direction_count" not in st.session_state:
+        st.session_state.eye_direction_count = {"left": 0, "right": 0, "center": 0}
+    if "head_movement_count" not in st.session_state:
+        st.session_state.head_movement_count = {"up": 0, "down": 0, "still": 0}
+    if "camera_running" not in st.session_state:
+        st.session_state.camera_running = False
+    if "cap" not in st.session_state:
+        st.session_state.cap = None
+    if "processing_initialized" not in st.session_state:
+        st.session_state.processing_initialized = False
 
-# State to control the camera
-if "camera_running" not in st.session_state:
-    st.session_state.camera_running = False
-
+initialize_session_state()
 
 # Function to log data to the report
 def log_to_report(mode, analysis):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     st.session_state.behavior_report.append(f"{timestamp} - {mode}: {analysis}")
 
-
 # Function to analyze emotion using DeepFace
 def analyze_emotion(frame):
     result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False)
-    emotion_scores = result[0]['emotion']
-    return emotion_scores
-
+    return result[0]['emotion']
 
 # Function to analyze hand gestures
 def analyze_hands(frame, hands):
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = hands.process(frame_rgb)
-
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
-            # Example: Check if the hand is tense (fingers closed) or relaxed (fingers open)
             thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
             index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
             distance = abs(thumb_tip.x - index_tip.x) + abs(thumb_tip.y - index_tip.y)
-
             if distance < 0.1:
                 st.session_state.hand_gesture_count["tense"] += 1
             else:
                 st.session_state.hand_gesture_count["relaxed"] += 1
-
-            # Draw hand landmarks on the frame
             mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-
 
 # Function to analyze eye direction and head movement
 def analyze_face(frame, face_mesh):
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(frame_rgb)
-
     if results.multi_face_landmarks:
         for face_landmarks in results.multi_face_landmarks:
-            # Example: Check eye direction (left, right, center)
             left_eye = face_landmarks.landmark[33]
             right_eye = face_landmarks.landmark[263]
-
             if left_eye.x < 0.4:
                 st.session_state.eye_direction_count["left"] += 1
             elif right_eye.x > 0.6:
                 st.session_state.eye_direction_count["right"] += 1
             else:
                 st.session_state.eye_direction_count["center"] += 1
-
-            # Example: Check head movement (up, down, still)
-            nose_tip = face_landmarks.landmark[4]  # Nose tip landmark
+            
+            nose_tip = face_landmarks.landmark[4]
             if nose_tip.y < 0.4:
                 st.session_state.head_movement_count["up"] += 1
             elif nose_tip.y > 0.6:
                 st.session_state.head_movement_count["down"] += 1
             else:
                 st.session_state.head_movement_count["still"] += 1
-
-            # Draw face landmarks on the frame
+            
             mp_drawing.draw_landmarks(frame, face_landmarks, mp_face_mesh.FACEMESH_CONTOURS)
 
+# Streamlit UI
+st.title("Emotion & Behavior Analyzer")
+st.sidebar.header("Settings")
 
-# Function to start analysis based on the selected mode and input source
-def start_analysis(mode, input_source):
-    if input_source == "camera":
-        cap = cv2.VideoCapture(0)
-    else:
-        file_path = st.file_uploader("Upload a video file", type=["mp4", "avi", "mov"])
-        if file_path is None:
-            st.warning("Please upload a video file.")
-            return
-        cap = cv2.VideoCapture(file_path.name)
+# Mode selection
+mode = st.sidebar.selectbox("Select Mode", ["Detective", "Student Behavior", "Interview"])
+input_source = st.sidebar.radio("Select Input Source", ["camera", "video"])
 
-    stframe = st.empty()  # Streamlit placeholder for the video frame
+# Main processing function
+def process_frame():
+    if input_source == "camera" and st.session_state.cap is None:
+        st.session_state.cap = cv2.VideoCapture(0)
+    
+    if not st.session_state.processing_initialized:
+        st.session_state.hands = mp_hands.Hands(
+            min_detection_confidence=0.7, 
+            min_tracking_confidence=0.7
+        )
+        st.session_state.face_mesh = mp_face_mesh.FaceMesh(
+            min_detection_confidence=0.7, 
+            min_tracking_confidence=0.7
+        )
+        st.session_state.processing_initialized = True
+    
+    ret, frame = st.session_state.cap.read()
+    if ret:
+        # Emotion analysis
+        emotion_scores = analyze_emotion(frame)
+        for emotion, score in emotion_scores.items():
+            st.session_state.emotion_totals[emotion] += score
+        st.session_state.frame_count += 1
 
-    with mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7) as hands, \
-            mp_face_mesh.FaceMesh(min_detection_confidence=0.7, min_tracking_confidence=0.7) as face_mesh:
+        # Hand analysis
+        analyze_hands(frame, st.session_state.hands)
 
-        while st.session_state.camera_running and cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+        # Face analysis
+        analyze_face(frame, st.session_state.face_mesh)
 
-            # Analyze the emotion using DeepFace
-            emotion_scores = analyze_emotion(frame)
+        # Display processing
+        dominant_emotion = max(emotion_scores, key=emotion_scores.get)
+        dominant_score = emotion_scores[dominant_emotion]
+        frame = cv2.putText(frame, f"{dominant_emotion}: {dominant_score:.2f}%", 
+                          (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        y_offset = 100
+        for emotion, score in emotion_scores.items():
+            frame = cv2.putText(frame, f"{emotion}: {score:.2f}%", (50, y_offset),
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            y_offset += 30
 
-            # Accumulate the emotion percentages over time (for each frame)
-            for emotion, score in emotion_scores.items():
-                st.session_state.emotion_totals[emotion] += score
-            st.session_state.frame_count += 1
+        st.session_state.current_frame = frame
+        st.experimental_rerun()
 
-            # Analyze hand gestures
-            analyze_hands(frame, hands)
+# Start/Stop controls
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    if st.button("Start Analysis") and not st.session_state.camera_running:
+        st.session_state.camera_running = True
+        st.session_state.processing_initialized = False
+        if st.session_state.cap is not None:
+            st.session_state.cap.release()
+            st.session_state.cap = None
+        st.experimental_rerun()
 
-            # Analyze eye direction and head movement
-            analyze_face(frame, face_mesh)
+with col2:
+    if st.button("Stop Analysis") and st.session_state.camera_running:
+        st.session_state.camera_running = False
+        if st.session_state.cap is not None:
+            st.session_state.cap.release()
+            st.session_state.cap = None
+        if st.session_state.processing_initialized:
+            st.session_state.hands.close()
+            st.session_state.face_mesh.close()
+            st.session_state.processing_initialized = False
+        generate_report(mode)
 
-            # Find the dominant emotion
-            dominant_emotion = max(emotion_scores, key=emotion_scores.get)
-            dominant_emotion_score = emotion_scores[dominant_emotion]
+# Main display
+if st.session_state.camera_running:
+    if 'current_frame' in st.session_state:
+        st.image(st.session_state.current_frame, channels="BGR", 
+                use_column_width=True, caption="Live Camera Feed")
+    process_frame()
 
-            # Display the dominant emotion and its percentage
-            emotion_text = f"{dominant_emotion}: {dominant_emotion_score:.2f}%"
-            frame = cv2.putText(frame, emotion_text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-            # Display the percentages for all emotions
-            y_offset = 100
-            for emotion, score in emotion_scores.items():
-                frame = cv2.putText(frame, f"{emotion}: {score:.2f}%", (50, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                                    (0, 255, 0), 2)
-                y_offset += 30
-
-            # Mode-based behavior analysis
-            if mode == "Detective":
-                log_to_report(mode, f"Detecting: {dominant_emotion} ({dominant_emotion_score:.2f}%)")
-            elif mode == "Student Behavior":
-                log_to_report(mode, f"Tracking: {dominant_emotion} ({dominant_emotion_score:.2f}%)")
-            elif mode == "Interview":
-                log_to_report(mode, f"Analyzing: {dominant_emotion} ({dominant_emotion_score:.2f}%)")
-
-            # Display the frame with the predicted emotion and percentages
-            stframe.image(frame, channels="BGR", use_column_width=True)
-
-            if cv2.waitKey(10) & 0xFF == ord('q'):
-                break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-    # Generate the report based on accumulated emotions and body language
-    generate_report(mode)
-
-
-# Function to generate the report and display it in Streamlit
+# Report generation function
 def generate_report(mode):
     if st.session_state.frame_count == 0:  # Avoid division by zero
         st.session_state.frame_count = 1
