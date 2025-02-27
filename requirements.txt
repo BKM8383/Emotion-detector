@@ -1,0 +1,7 @@
+streamlit
+opencv-python
+deepface
+mediapipe
+google-genai
+numpy
+deepface-cv2
