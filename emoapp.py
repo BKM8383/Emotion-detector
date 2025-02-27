@@ -90,9 +90,32 @@ def analyze_face(frame, face_mesh):
 st.title("Emotion & Behavior Analyzer")
 st.sidebar.header("Settings")
 
-# Mode selection
+# Mode selection and input source - ONLY ONCE
 mode = st.sidebar.selectbox("Select Mode", ["Detective", "Student Behavior", "Interview"])
 input_source = st.sidebar.radio("Select Input Source", ["camera", "video"])
+
+# Start/Stop controls - Keep this section as is
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    if st.button("Start Analysis") and not st.session_state.camera_running:
+        st.session_state.camera_running = True
+        st.session_state.processing_initialized = False
+        if st.session_state.cap is not None:
+            st.session_state.cap.release()
+            st.session_state.cap = None
+        st.experimental_rerun()
+
+with col2:
+    if st.button("Stop Analysis") and st.session_state.camera_running:
+        st.session_state.camera_running = False
+        if st.session_state.cap is not None:
+            st.session_state.cap.release()
+            st.session_state.cap = None
+        if st.session_state.processing_initialized:
+            st.session_state.hands.close()
+            st.session_state.face_mesh.close()
+            st.session_state.processing_initialized = False
+        generate_report(mode)
 
 # Main processing function
 def process_frame():
